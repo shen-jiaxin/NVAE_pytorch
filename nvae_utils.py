@@ -52,9 +52,9 @@ class SELayer(nn.Module):
         return x * se
 
 
-class Encoder_Residual_Cell(nn.Module):  # TODO seq_weight, momentum definition, conv size
-    def __init__(self, num_channels, seq_weight=0.1):
-        super(Encoder_Residual_Cell, self).__init__()
+class EncoderResidualCell(nn.Module):  # TODO seq_weight, momentum definition, conv size
+    def __init__(self, num_channels, seq_weight):
+        super(EncoderResidualCell, self).__init__()
         self.seq_weight = seq_weight
         self.seq = nn.Sequential(
             nn.BatchNorm2d(num_channels, momentum=0.05),
@@ -70,9 +70,9 @@ class Encoder_Residual_Cell(nn.Module):  # TODO seq_weight, momentum definition,
         return x + self.seq_weight * self.seq(x)
 
 
-class Decoder_Residual_Cell(nn.Module):  # TODO seq_weight, momentum definition, conv size
-    def __init__(self, num_channels, up_times=2, seq_weight=0.1):
-        super(Decoder_Residual_Cell, self).__init__()
+class DecoderResidualCell(nn.Module):  # TODO seq_weight, momentum definition, conv size
+    def __init__(self, num_channels, up_times, seq_weight):
+        super(DecoderResidualCell, self).__init__()
         num_up_channels = num_channels * up_times
         self.seq_weight = seq_weight
         self.seq = nn.Sequential(
@@ -121,6 +121,34 @@ class ConvTranBlock(nn.Module):
         return self.convtran(x)
 
 
+class EncoderBlock(nn.Module):
+    def __init__(self, num_in_channel, num_out_channel, num_residual_cell, seq_weight=0.1):
+        super(EncoderBlock, self).__init__()
+        self.module_list = [ConvBlock(num_in_channel, num_out_channel)]
+        for i in range(num_residual_cell):
+            self.module_list.append(EncoderResidualCell(num_out_channel, seq_weight))
+        self.module_list = nn.ModuleList(self.module_list)
+
+    def forward(self, x):
+        for module in self.module_list:
+            x = module(x)
+        return x
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, num_in_channel, num_out_channel, num_residual_cell, residual_up_times=2, seq_weight=0.1):
+        super(DecoderBlock, self).__init__()
+        self.module_list = [ConvTranBlock(num_in_channel, num_out_channel)]
+        for i in range(num_residual_cell):
+            self.module_list.append(DecoderResidualCell(num_out_channel, residual_up_times, seq_weight))
+        self.module_list = nn.ModuleList(self.module_list)
+
+    def forward(self, x):
+        for module in self.module_list:
+            x = module(x)
+        return x
+
+
 class Combiner(nn.Module):
     def __init__(self, num_channel, combiner_type):
         super(Combiner, self).__init__()
@@ -149,3 +177,21 @@ def kl(mu, logvar):
 def kl_rela(logvar, delta_mu, delta_logvar):
     kld = 0.5 * torch.sum(delta_mu.pow(2) / logvar.exp() + delta_logvar.exp() - delta_logvar - 1)
     return kld
+
+
+def channels_cal(num_in_channel, num_in_size, latent_z_size):
+    num_max_channel = latent_z_size[0]
+    num_min_size = latent_z_size[1]
+    if num_max_channel / 4 < num_in_size / num_min_size:
+        raise Exception('Expect: latent_z_size[0]/4 >= num_in_size/latent_z_size[1]')
+
+    num_channels_list = []
+    num_group = 0
+    num_current_channels = num_max_channel
+    while num_min_size * 2 ** num_group < num_in_size:
+        num_channels_list.append(num_current_channels)
+        num_group += 1
+        num_current_channels //= 2
+    num_channels_list.append(num_in_channel)
+    num_channels_list.reverse()
+    return num_group, num_channels_list

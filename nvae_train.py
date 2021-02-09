@@ -5,7 +5,9 @@ import torchvision
 import matplotlib.pyplot as plt
 import numpy as np
 import platform
+import os
 from nvae import NvaeModel
+
 
 
 EPOCH = 100
@@ -13,12 +15,14 @@ BATCH_SIZE = 256
 LR = 0.0001
 NUM_WORKERS = 0 if platform.system() == 'Windows' else 4
 datasets = ['MNIST', 'CIFAR10', 'CelebA']
-dataset = datasets[2]
+dataset = datasets[1]
 NUM_IN_SIZE = 32
 NUM_IN_CHANNEL = 3
 
 save_pics_path = './pics/' + dataset
 dataset_path = 'D:\Data\SoftwareSave\Python\Datasets'
+if not os.path.exists(save_pics_path):
+    os.makedirs(save_pics_path)
 
 
 transform = torchvision.transforms.Compose(
@@ -64,8 +68,6 @@ train_loader = Data.DataLoader(
     drop_last=True,
 )
 
-recon_loss_func = nn.MSELoss(reduction='sum').cuda()
-
 nvae = NvaeModel(num_in_channel=NUM_IN_CHANNEL, num_in_size=NUM_IN_SIZE, batch_size=BATCH_SIZE)
 nvae.cuda()
 optimizer = torch.optim.Adam(nvae.parameters(), lr=LR)
@@ -90,8 +92,7 @@ for epoch in range(EPOCH):
     for step, (x, b_label) in enumerate(train_loader):
         b_x = x.cuda()
 
-        recon_x, loss_kl = nvae(b_x)
-        loss = 100 * recon_loss_func(recon_x, b_x) + loss_kl
+        recon, mu_logvar_list, loss = nvae(b_x)
 
         optimizer.zero_grad()  # clear gradients for this training step
         loss.backward()  # backpropagation, compute gradients
@@ -105,10 +106,10 @@ for epoch in range(EPOCH):
             for i in range(10):
                 if NUM_IN_CHANNEL == 1:
                     a[img_row][i].imshow(np.reshape(b_x.cpu().data[i].numpy(), (32, 32)), cmap='gray')
-                    a[img_row + 1][i].imshow(np.reshape(recon_x.cpu().data[i].numpy(), (32, 32)), cmap='gray')
+                    a[img_row + 1][i].imshow(np.reshape(recon.cpu().data[i].numpy(), (32, 32)), cmap='gray')
                 else:
                     a[img_row][i].imshow(np.transpose(b_x.cpu().data[i].numpy()/2+0.5, (1, 2, 0)))
-                    a[img_row + 1][i].imshow(np.clip(np.transpose(recon_x.cpu().data[i].numpy() / 2 + 0.5, (1, 2, 0)), 0, 1))
+                    a[img_row + 1][i].imshow(np.clip(np.transpose(recon.cpu().data[i].numpy() / 2 + 0.5, (1, 2, 0)), 0, 1))
                 a[img_row][i].set_xticks(())
                 a[img_row][i].set_yticks(())
                 a[img_row+1][i].set_xticks(())
@@ -119,6 +120,7 @@ for epoch in range(EPOCH):
     plt.savefig(pic_name, bbox_inches='tight')
     plt.show()
 
+plt.figure()
 plt.plot(loss_hist)
 loss_pic_name = save_pics_path + '/nvae - loss - hist.png'
 plt.savefig(loss_pic_name, bbox_inches='tight')
