@@ -98,11 +98,18 @@ class DecoderResidualCell(nn.Module):  # TODO seq_weight, momentum definition, c
 class ConvBlock(nn.Module):
     def __init__(self, num_in_channel, num_out_channel):
         super(ConvBlock, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(num_in_channel, num_out_channel, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(num_out_channel, momentum=0.05),
-            Swish(),
-        )
+        if num_in_channel == num_out_channel:
+            self.conv = nn.Sequential(
+                nn.Conv2d(num_in_channel, num_out_channel, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(num_out_channel, momentum=0.05),
+                Swish(),
+            )
+        else:
+            self.conv = nn.Sequential(
+                nn.Conv2d(num_in_channel, num_out_channel, kernel_size=3, stride=2, padding=1),
+                nn.BatchNorm2d(num_out_channel, momentum=0.05),
+                Swish(),
+            )
 
     def forward(self, x):
         return self.conv(x)
@@ -111,11 +118,18 @@ class ConvBlock(nn.Module):
 class ConvTranBlock(nn.Module):
     def __init__(self, num_in_channel, num_out_channel):
         super(ConvTranBlock, self).__init__()
-        self.convtran = nn.Sequential(
-            nn.ConvTranspose2d(num_in_channel, num_out_channel, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(num_out_channel, momentum=0.05),
-            Swish(),
-        )
+        if num_in_channel == num_out_channel:
+            self.convtran = nn.Sequential(
+                nn.ConvTranspose2d(num_in_channel, num_out_channel, kernel_size=3, stride=1, padding=1, output_padding=0),
+                nn.BatchNorm2d(num_out_channel, momentum=0.05),
+                Swish(),
+            )
+        else:
+            self.convtran = nn.Sequential(
+                nn.ConvTranspose2d(num_in_channel, num_out_channel, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.BatchNorm2d(num_out_channel, momentum=0.05),
+                Swish(),
+            )
 
     def forward(self, x):
         return self.convtran(x)
@@ -153,13 +167,16 @@ class Combiner(nn.Module):
     def __init__(self, num_channel, combiner_type):
         super(Combiner, self).__init__()
         if combiner_type == 'enc':
-            self.conv = nn.Conv2d(2*num_channel, 2*num_channel, kernel_size=1, stride=1)
+            self.seq = nn.Sequential(
+                nn.Conv2d(2 * num_channel, 2 * num_channel, kernel_size=1, stride=1),
+                nn.Tanh(),
+            )
         else:
-            self.conv = nn.Conv2d(2*num_channel, num_channel, kernel_size=1, stride=1)
+            self.seq = nn.Conv2d(2*num_channel, num_channel, kernel_size=1, stride=1)
 
     def forward(self, x1, x2):
         out = torch.cat((x1, x2), dim=1)
-        out = self.conv(out)
+        out = self.seq(out)
         return out
 
 
@@ -175,22 +192,27 @@ def kl(mu, logvar):
 
 
 def kl_rela(logvar, delta_mu, delta_logvar):
-    kld = 0.5 * torch.sum(delta_mu.pow(2) / logvar.exp() + delta_logvar.exp() - delta_logvar - 1)
+    kld = 0.5 * torch.sum(delta_mu.pow(2) / (logvar.exp() + 1e-7) + delta_logvar.exp() - delta_logvar - 1)
     return kld
 
 
-def channels_cal(num_in_channel, num_in_size, latent_z_size):
+def channels_cal(num_in_channel, num_in_size, latent_z_size, double_group):
     num_max_channel = latent_z_size[0]
-    num_min_size = latent_z_size[1]
-    if num_max_channel / 4 < num_in_size / num_min_size:
-        raise Exception('Expect: latent_z_size[0]/4 >= num_in_size/latent_z_size[1]')
+    num_min_size = latent_z_size[1:]
+    if num_max_channel / 4 < num_in_size[0] / num_min_size[0] or num_max_channel / 4 < num_in_size[1] / num_min_size[1]:
+        raise Exception('Expect: latent_z_size[0]/4 >= num_in_size[i]/latent_z_size[i]')
 
     num_channels_list = []
     num_group = 0
+    num_single_group = 0
     num_current_channels = num_max_channel
-    while num_min_size * 2 ** num_group < num_in_size:
+    while num_min_size[0] * 2 ** num_single_group < num_in_size[0] and num_min_size[1] * 2 ** num_single_group < num_in_size[1]:
         num_channels_list.append(num_current_channels)
+        num_single_group += 1
         num_group += 1
+        if double_group:
+            num_channels_list.append(num_current_channels)
+            num_group += 1
         num_current_channels //= 2
     num_channels_list.append(num_in_channel)
     num_channels_list.reverse()

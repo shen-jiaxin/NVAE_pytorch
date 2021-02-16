@@ -2,5 +2,7 @@
 .idea
 __pycache__
 pics
+states
 backup*
 test*
+nvae_train_ki.py

@@ -6,35 +6,35 @@ import matplotlib.pyplot as plt
 import numpy as np
 import platform
 import os
+import math
 from nvae import NvaeModel
 
 
-
 EPOCH = 100
-BATCH_SIZE = 256
-LR = 0.0001
+BATCH_SIZE = 128
+LR = 0.001
 NUM_WORKERS = 0 if platform.system() == 'Windows' else 4
 datasets = ['MNIST', 'CIFAR10', 'CelebA']
 dataset = datasets[1]
-NUM_IN_SIZE = 32
-NUM_IN_CHANNEL = 3
+NUM_IN_CHANNEL = 3  # 1 for gray images and 3 for RGB images
+NUM_IN_SIZE = (32, 32)  # target size of resizing, (H, W)
+LATENT_Z_SIZE = (64, 4, 4)  # target dimensions of latent variable with highest level, (C, H, W)
+DOUBLE_GROUP = True
 
 save_pics_path = './pics/' + dataset
-dataset_path = 'D:\Data\SoftwareSave\Python\Datasets'
+dataset_path = r'D:\Data\SoftwareSave\Python\Datasets'
 if not os.path.exists(save_pics_path):
     os.makedirs(save_pics_path)
 
-
 transform = torchvision.transforms.Compose(
-    [torchvision.transforms.Resize((NUM_IN_SIZE, NUM_IN_SIZE)),
+    [torchvision.transforms.Resize((NUM_IN_SIZE[0], NUM_IN_SIZE[1])),
      torchvision.transforms.ToTensor(),
      torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 if dataset == 'MNIST':
     NUM_IN_CHANNEL = 1
-    num_training_img = 60000
     transform = torchvision.transforms.Compose(
-        [torchvision.transforms.Resize((NUM_IN_SIZE, NUM_IN_SIZE)),
+        [torchvision.transforms.Resize((NUM_IN_SIZE[0], NUM_IN_SIZE[1])),
          torchvision.transforms.ToTensor(), ])
     train_data = torchvision.datasets.MNIST(
         root=dataset_path,
@@ -43,7 +43,6 @@ if dataset == 'MNIST':
         download=True,
     )
 elif dataset == 'CIFAR10':
-    num_training_img = 50000
     train_data = torchvision.datasets.CIFAR10(
         root=dataset_path,
         train=True,
@@ -51,13 +50,14 @@ elif dataset == 'CIFAR10':
         download=True,
     )
 elif dataset == 'CelebA':
-    num_training_img = 162770
     train_data = torchvision.datasets.CelebA(
         root=dataset_path,
         split='train',
         transform=transform,
         download=True,
     )
+
+num_training_img = train_data.__len__()
 
 train_loader = Data.DataLoader(
     dataset=train_data,
@@ -68,10 +68,15 @@ train_loader = Data.DataLoader(
     drop_last=True,
 )
 
-nvae = NvaeModel(num_in_channel=NUM_IN_CHANNEL, num_in_size=NUM_IN_SIZE, batch_size=BATCH_SIZE)
+nvae = NvaeModel(num_in_channel=NUM_IN_CHANNEL,
+                 num_in_size=NUM_IN_SIZE,
+                 batch_size=BATCH_SIZE,
+                 latent_z_size=LATENT_Z_SIZE,
+                 double_group=DOUBLE_GROUP,)
 nvae.cuda()
 optimizer = torch.optim.Adam(nvae.parameters(), lr=LR)
 loss_hist = []
+flag = True
 
 for epoch in range(EPOCH):
     num_batch = num_training_img // BATCH_SIZE
@@ -81,18 +86,21 @@ for epoch in range(EPOCH):
         plot_step = 200
     else:
         plot_step = 300
-    plot_row = num_batch // plot_step + 1
-    if plot_row <= 2:
+    plot_set = num_batch // plot_step + 1
+    if plot_set <= 2:
         plot_step //= 2
-        plot_row *= 2
-    fig_size = -(-12 * NUM_IN_SIZE * plot_row // 256)
-
-    _, a = plt.subplots(plot_row * 3, 10, figsize=(fig_size, fig_size))
+        plot_set *= 2
+    fig_size_h = 4 * plot_set * NUM_IN_SIZE[0] / 100
+    fig_size_w = 12 * NUM_IN_SIZE[1] / 100
+    _, a = plt.subplots(plot_set * 3, 10, figsize=(fig_size_w, fig_size_h), dpi=150)
 
     for step, (x, b_label) in enumerate(train_loader):
         b_x = x.cuda()
 
         recon, mu_logvar_list, loss = nvae(b_x)
+        if math.isnan(loss):
+            flag = False
+            break
 
         optimizer.zero_grad()  # clear gradients for this training step
         loss.backward()  # backpropagation, compute gradients
@@ -116,6 +124,8 @@ for epoch in range(EPOCH):
                 a[img_row+1][i].set_yticks(())
                 a[img_row+2][i].set_xticks(())
                 a[img_row+2][i].set_yticks(())
+    if not flag:
+        break
     pic_name = save_pics_path + '/nvae - Epoch ' + str(epoch) + '.png'
     plt.savefig(pic_name, bbox_inches='tight')
     plt.show()
