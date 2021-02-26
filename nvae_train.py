@@ -10,16 +10,16 @@ import math
 from nvae import NvaeModel
 
 
-EPOCH = 100
+EPOCH = 50
 BATCH_SIZE = 128
-LR = 0.001
+LR = 0.0003
 NUM_WORKERS = 0 if platform.system() == 'Windows' else 4
 datasets = ['MNIST', 'CIFAR10', 'CelebA']
 dataset = datasets[1]
 NUM_IN_CHANNEL = 3  # 1 for gray images and 3 for RGB images
 NUM_IN_SIZE = (32, 32)  # target size of resizing, (H, W)
 LATENT_Z_SIZE = (64, 4, 4)  # target dimensions of latent variable with highest level, (C, H, W)
-DOUBLE_GROUP = True
+DOUBLE_GROUP = True  # option for doubling groups of latent variables
 
 save_pics_path = './pics/' + dataset
 dataset_path = r'D:\Data\SoftwareSave\Python\Datasets'
@@ -79,6 +79,8 @@ loss_hist = []
 flag = True
 
 for epoch in range(EPOCH):
+
+    # commands for plot
     num_batch = num_training_img // BATCH_SIZE
     if num_batch <= 400:
         plot_step = 100
@@ -106,6 +108,7 @@ for epoch in range(EPOCH):
         loss.backward()  # backpropagation, compute gradients
         optimizer.step()  # apply gradients
 
+        # commands for plot
         if step % plot_step == 0:
             print('Epoch: ', epoch, ' | step: ', step, ' | train loss: %.4f' % loss.cpu().data.numpy())
             loss_hist.append(loss.cpu().data.numpy())
@@ -128,10 +131,13 @@ for epoch in range(EPOCH):
         break
     pic_name = save_pics_path + '/nvae - Epoch ' + str(epoch) + '.png'
     plt.savefig(pic_name, bbox_inches='tight')
-    plt.show()
+    # plt.show()
 
 plt.figure()
 plt.plot(loss_hist)
 loss_pic_name = save_pics_path + '/nvae - loss - hist.png'
 plt.savefig(loss_pic_name, bbox_inches='tight')
-plt.show()
+# plt.show()
+
+state_name = './states/' + dataset + '.pkl'
+torch.save(nvae.state_dict(), state_name)

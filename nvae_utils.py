@@ -5,7 +5,9 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class SwishFunction(torch.autograd.Function):
-    # class of swish activation function
+    """
+    Class of swish activation function.
+    """
     @staticmethod
     def forward(ctx, x_in):
         ctx.save_for_backward(x_in)
@@ -21,7 +23,9 @@ class SwishFunction(torch.autograd.Function):
 
 
 class Swish(nn.Module):
-    # call of swish activation function (as a layer)
+    """
+    Call of swish activation function (as a layer).
+    """
     def __init__(self):
         super(Swish, self).__init__()
 
@@ -30,7 +34,9 @@ class Swish(nn.Module):
 
 
 class SELayer(nn.Module):
-    # class for Squeeze and Excitation Layer
+    """
+    Class for Squeeze and Excitation Layer.
+    """
     def __init__(self, num_channels, reduction_ratio=16):
         super(SELayer, self).__init__()
         num_hidden = max(num_channels // reduction_ratio, 4)
@@ -53,6 +59,10 @@ class SELayer(nn.Module):
 
 
 class EncoderResidualCell(nn.Module):  # TODO seq_weight, momentum definition, conv size
+    """
+    Class for residual cell in encoder.\n
+    Structure: BN - Swish - Conv - BN - Swish - Conv - SE
+    """
     def __init__(self, num_channels, seq_weight):
         super(EncoderResidualCell, self).__init__()
         self.seq_weight = seq_weight
@@ -71,6 +81,10 @@ class EncoderResidualCell(nn.Module):  # TODO seq_weight, momentum definition, c
 
 
 class DecoderResidualCell(nn.Module):  # TODO seq_weight, momentum definition, conv size
+    """
+    Class for residual cell in encoder.\n
+    Structure: BN - Conv - BN - Swish - dep.Conv - BN - Swish - BN - SE
+    """
     def __init__(self, num_channels, up_times, seq_weight):
         super(DecoderResidualCell, self).__init__()
         num_up_channels = num_channels * up_times
@@ -96,6 +110,10 @@ class DecoderResidualCell(nn.Module):  # TODO seq_weight, momentum definition, c
 
 
 class ConvBlock(nn.Module):
+    """
+    Class for convolutional block.\n
+    Structure: conv - BN - Swish
+    """
     def __init__(self, num_in_channel, num_out_channel):
         super(ConvBlock, self).__init__()
         if num_in_channel == num_out_channel:
@@ -116,6 +134,10 @@ class ConvBlock(nn.Module):
 
 
 class ConvTranBlock(nn.Module):
+    """
+    Class for transposed convolutional block.\n
+    Structure: ConvTranspose - BN - Swish
+    """
     def __init__(self, num_in_channel, num_out_channel):
         super(ConvTranBlock, self).__init__()
         if num_in_channel == num_out_channel:
@@ -136,6 +158,10 @@ class ConvTranBlock(nn.Module):
 
 
 class EncoderBlock(nn.Module):
+    """
+    Class for encoder block.\n
+    Structure: Input - ConvBlock - EncoderResidual - ConvBlock - EncoderResidual - ...
+    """
     def __init__(self, num_in_channel, num_out_channel, num_residual_cell, seq_weight=0.1):
         super(EncoderBlock, self).__init__()
         self.module_list = [ConvBlock(num_in_channel, num_out_channel)]
@@ -150,6 +176,10 @@ class EncoderBlock(nn.Module):
 
 
 class DecoderBlock(nn.Module):
+    """
+    Class for decoder block.\n
+    Structure: Input - ConvTranBlock - DecoderResidual - ConvTranBlock - DecoderResidual - ...
+    """
     def __init__(self, num_in_channel, num_out_channel, num_residual_cell, residual_up_times=2, seq_weight=0.1):
         super(DecoderBlock, self).__init__()
         self.module_list = [ConvTranBlock(num_in_channel, num_out_channel)]
@@ -164,6 +194,12 @@ class DecoderBlock(nn.Module):
 
 
 class Combiner(nn.Module):
+    """
+    Class for combiners.\n
+    Type:\n
+    'enc': Channel_in = Channel_out\n
+    'dec': Channel_in = Channel_out * 2
+    """
     def __init__(self, num_channel, combiner_type):
         super(Combiner, self).__init__()
         if combiner_type == 'enc':
@@ -181,22 +217,51 @@ class Combiner(nn.Module):
 
 
 def reparametrize(mu, logvar):
+    """
+    Sample from a normal distribution.\n
+    :param mu: mean of normal distribution
+    :param logvar: log variance of normal distribution
+    :return: sampled value from normal distribution
+    """
     std = logvar.mul(0.5).exp_()
     z = mu + std * torch.randn_like(mu, device=DEVICE)
     return z
 
 
 def kl(mu, logvar):
+    """
+    KL-divergence of a distribution and a normal distribution.\n
+    :param mu: mean of a distribution
+    :param logvar: log variance of a distribution
+    :return: KL-divergence
+    """
     kld = 0.5 * torch.sum(mu.pow(2) + logvar.exp() - logvar - 1)
     return kld
 
 
 def kl_rela(logvar, delta_mu, delta_logvar):
+    """
+    Relative KL-divergence of two distributions base on relative value of mean and log variance.\n
+    :param logvar: log variance of a distribution
+    :param delta_mu: relative value of mean
+    :param delta_logvar: relative value of log variance
+    :return: relative KL-divergence
+    """
     kld = 0.5 * torch.sum(delta_mu.pow(2) / (logvar.exp() + 1e-7) + delta_logvar.exp() - delta_logvar - 1)
     return kld
 
 
 def channels_cal(num_in_channel, num_in_size, latent_z_size, double_group):
+    """
+    Calculates needed groups and channels for layers.\n
+    :param num_in_channel: The number of channels of input images.
+    :param num_in_size: Size of input images.
+    :param latent_z_size: Target size of latent_z.
+    :param double_group: Option for doubling groups of latent variables.
+    :return:
+        num_group: The number of groups of latent variables.
+        num_channels_list: List for the numbers of channels in different layers.
+    """
     num_max_channel = latent_z_size[0]
     num_min_size = latent_z_size[1:]
     if num_max_channel / 4 < num_in_size[0] / num_min_size[0] or num_max_channel / 4 < num_in_size[1] / num_min_size[1]:
