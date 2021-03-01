@@ -108,5 +108,5 @@ class NvaeModel(nn.Module):
             kl_loss += kl_rela(mu_logvar_list[i][1], delta_mu_logvar_list[i][0], delta_mu_logvar_list[i][1])
 
         # total_loss is combination of reconstruction loss and KL-loss
-        loss = 10 * recon_loss + kl_loss
+        loss = 100 * recon_loss + kl_loss
         return {'loss': loss, 'recon_loss': recon_loss, 'kl_loss': kl_loss}
